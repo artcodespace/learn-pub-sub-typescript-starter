@@ -1,13 +1,27 @@
 import amqp from "amqplib";
 import { getInput, printServerHelp } from "../internal/gamelogic/gamelogic.js";
+import { declareAndBind, SimpleQueueType } from "../internal/pubsub/consume.js";
 import { publishJSON } from "../internal/pubsub/publish.js";
-import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
+import {
+	ExchangePerilDirect,
+	ExchangePerilTopic,
+	GameLogSlug,
+	PauseKey,
+} from "../internal/routing/routing.js";
 
 async function main() {
 	console.log("Starting Peril server...");
 	const connectionString = "amqp://guest:guest@localhost:5672/";
 	const conn = await amqp.connect(connectionString);
 	const confChannel = await conn.createConfirmChannel();
+
+	await declareAndBind(
+		conn,
+		ExchangePerilTopic,
+		GameLogSlug,
+		`${GameLogSlug}.*`,
+		SimpleQueueType.Durable,
+	);
 	console.log("Connection successful");
 	process.on("SIGINT", async () => {
 		console.log("Attempting shutdown");
