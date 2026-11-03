@@ -6,25 +6,28 @@ import {
 	printClientHelp,
 	printQuit,
 } from "../internal/gamelogic/gamelogic.js";
+import type { ArmyMove } from "../internal/gamelogic/gamedata.js";
+import type { PlayingState } from "../internal/gamelogic/gamestate.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
+import { handlerMove, handlerPause } from "./handlers.js";
 import { commandMove } from "../internal/gamelogic/move.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
-import { declareAndBind, SimpleQueueType } from "../internal/pubsub/consume.js";
-import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
+import { SimpleQueueType, subscribeJSON } from "../internal/pubsub/consume.js";
+import { publishJSON } from "../internal/pubsub/publish.js";
+import {
+	ArmyMovesPrefix,
+	ExchangePerilDirect,
+	ExchangePerilTopic,
+	PauseKey,
+} from "../internal/routing/routing.js";
 
 async function main() {
 	console.log("Starting Peril client...");
 	const connectionString = "amqp://guest:guest@localhost:5672/";
 	const clientName = await clientWelcome();
 	const conn = await amqp.connect(connectionString);
+	const confChannel = await conn.createConfirmChannel();
 
-	await declareAndBind(
-		conn,
-		ExchangePerilDirect,
-		`${PauseKey}.${clientName}`,
-		PauseKey,
-		SimpleQueueType.Transient,
-	);
 	console.log("Connection successful");
 
 	process.on("SIGINT", async () => {
@@ -35,6 +38,24 @@ async function main() {
 	});
 
 	const gameState = new GameState(clientName);
+
+	await subscribeJSON<PlayingState>(
+		conn,
+		ExchangePerilDirect,
+		`${PauseKey}.${clientName}`,
+		PauseKey,
+		SimpleQueueType.Transient,
+		handlerPause(gameState),
+	);
+
+	await subscribeJSON<ArmyMove>(
+		conn,
+		ExchangePerilTopic,
+		`${ArmyMovesPrefix}.${clientName}`,
+		`${ArmyMovesPrefix}.*`,
+		SimpleQueueType.Transient,
+		handlerMove(gameState),
+	);
 
 	while (true) {
 		const words = await getInput();
@@ -50,8 +71,14 @@ async function main() {
 			}
 		} else if (words[0] === "move") {
 			try {
-				commandMove(gameState, words);
-				console.log("Move successful");
+				const move = commandMove(gameState, words);
+				await publishJSON(
+					confChannel,
+					ExchangePerilTopic,
+					`${ArmyMovesPrefix}.${clientName}`,
+					move,
+				);
+				console.log("Move published successfully");
 			} catch (err) {
 				console.log((err as Error).message);
 			}
