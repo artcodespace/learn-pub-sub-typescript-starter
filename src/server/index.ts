@@ -1,4 +1,5 @@
 import amqp from "amqplib";
+import { getInput, printServerHelp } from "../internal/gamelogic/gamelogic.js";
 import { publishJSON } from "../internal/pubsub/publish.js";
 import { ExchangePerilDirect, PauseKey } from "../internal/routing/routing.js";
 
@@ -7,9 +8,6 @@ async function main() {
 	const connectionString = "amqp://guest:guest@localhost:5672/";
 	const conn = await amqp.connect(connectionString);
 	const confChannel = await conn.createConfirmChannel();
-	await publishJSON(confChannel, ExchangePerilDirect, PauseKey, {
-		isPaused: true,
-	});
 	console.log("Connection successful");
 	process.on("SIGINT", async () => {
 		console.log("Attempting shutdown");
@@ -17,6 +15,29 @@ async function main() {
 		console.log("Shutdown complete");
 		process.exit(0);
 	});
+
+	printServerHelp();
+	while (true) {
+		const input = await getInput();
+		if (input.length === 0) continue;
+		const first = input.at(0);
+		if (first === "pause") {
+			console.log("Sending a pause message");
+			await publishJSON(confChannel, ExchangePerilDirect, PauseKey, {
+				isPaused: true,
+			});
+		} else if (first === "resume") {
+			console.log("Sending a resume message");
+			await publishJSON(confChannel, ExchangePerilDirect, PauseKey, {
+				isPaused: false,
+			});
+		} else if (first === "quit") {
+			console.log("Exiting");
+			break;
+		} else {
+			console.log("Unknown command");
+		}
+	}
 }
 
 main().catch((err) => {
