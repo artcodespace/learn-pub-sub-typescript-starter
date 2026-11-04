@@ -1,4 +1,4 @@
-import amqp from "amqplib";
+import amqp, { type ConfirmChannel } from "amqplib";
 import {
 	clientWelcome,
 	commandStatus,
@@ -10,20 +10,40 @@ import type {
 	ArmyMove,
 	RecognitionOfWar,
 } from "../internal/gamelogic/gamedata.js";
+import type { GameLog } from "../internal/gamelogic/logs.js";
 import type { PlayingState } from "../internal/gamelogic/gamestate.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
 import { handlerMove, handlerPause, handlerWar } from "./handlers.js";
 import { commandMove } from "../internal/gamelogic/move.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
 import { SimpleQueueType, subscribeJSON } from "../internal/pubsub/consume.js";
-import { publishJSON } from "../internal/pubsub/publish.js";
+import { publishJSON, publishMsgPack } from "../internal/pubsub/publish.js";
 import {
 	ArmyMovesPrefix,
 	ExchangePerilDirect,
 	ExchangePerilTopic,
+	GameLogSlug,
 	PauseKey,
 	WarRecognitionsPrefix,
 } from "../internal/routing/routing.js";
+
+export async function publishGameLog(
+	ch: ConfirmChannel,
+	username: string,
+	message: string,
+): Promise<void> {
+	const gameLog: GameLog = {
+		username,
+		message,
+		currentTime: new Date(),
+	};
+	await publishMsgPack(
+		ch,
+		ExchangePerilTopic,
+		`${GameLogSlug}.${username}`,
+		gameLog,
+	);
+}
 
 async function main() {
 	console.log("Starting Peril client...");
@@ -67,7 +87,7 @@ async function main() {
 		WarRecognitionsPrefix,
 		`${WarRecognitionsPrefix}.*`,
 		SimpleQueueType.Durable,
-		handlerWar(gameState),
+		handlerWar(gameState, confChannel),
 	);
 
 	while (true) {

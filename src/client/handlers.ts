@@ -8,6 +8,7 @@ import { handleMove, MoveOutcome } from "../internal/gamelogic/move.js";
 import { handlePause } from "../internal/gamelogic/pause.js";
 import { handleWar, WarOutcome } from "../internal/gamelogic/war.js";
 import { AckType } from "../internal/pubsub/consume.js";
+import { publishGameLog } from "./index.js";
 import { publishJSON } from "../internal/pubsub/publish.js";
 import {
 	ExchangePerilTopic,
@@ -38,14 +39,22 @@ export function handlerMove(
 					attacker: move.player,
 					defender: gs.getPlayerSnap(),
 				};
-				await publishJSON(
-					ch,
-					ExchangePerilTopic,
-					`${WarRecognitionsPrefix}.${gs.getPlayerSnap().username}`,
-					rw,
-				);
+				try {
+					await publishJSON(
+						ch,
+						ExchangePerilTopic,
+						`${WarRecognitionsPrefix}.${gs.getPlayerSnap().username}`,
+						rw,
+					);
+				} catch (err) {
+					console.log(
+						`Error publishing war declaration: ${(err as Error).message}`,
+					);
+					process.stdout.write("> ");
+					return AckType.NackRequeue;
+				}
 				process.stdout.write("> ");
-				return AckType.NackRequeue;
+				return AckType.Ack;
 			}
 			case MoveOutcome.SamePlayer:
 				process.stdout.write("> ");
@@ -59,11 +68,13 @@ export function handlerMove(
 
 export function handlerWar(
 	gs: GameState,
+	ch: ConfirmChannel,
 ): (rw: RecognitionOfWar) => Promise<AckType> {
 	return async (rw: RecognitionOfWar) => {
 		const resolution = handleWar(gs, rw);
 		process.stdout.write("> ");
 
+		let message: string;
 		switch (resolution.result) {
 			case WarOutcome.NotInvolved:
 				return AckType.NackRequeue;
@@ -71,11 +82,22 @@ export function handlerWar(
 				return AckType.NackDiscard;
 			case WarOutcome.OpponentWon:
 			case WarOutcome.YouWon:
+				message = `${resolution.winner} won a war against ${resolution.loser}`;
+				break;
 			case WarOutcome.Draw:
-				return AckType.Ack;
+				message = `A war between ${resolution.attacker} and ${resolution.defender} resulted in a draw`;
+				break;
 			default:
 				console.log("Error: unknown war outcome");
 				return AckType.NackDiscard;
 		}
+
+		try {
+			await publishGameLog(ch, rw.attacker.username, message);
+		} catch (err) {
+			console.log(`Error publishing game log: ${(err as Error).message}`);
+			return AckType.NackRequeue;
+		}
+		return AckType.Ack;
 	};
 }
