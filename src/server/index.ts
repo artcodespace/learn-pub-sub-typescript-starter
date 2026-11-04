@@ -1,6 +1,12 @@
 import amqp from "amqplib";
 import { getInput, printServerHelp } from "../internal/gamelogic/gamelogic.js";
-import { declareAndBind, SimpleQueueType } from "../internal/pubsub/consume.js";
+import type { GameLog } from "../internal/gamelogic/logs.js";
+import { writeLog } from "../internal/gamelogic/logs.js";
+import {
+	AckType,
+	SimpleQueueType,
+	subscribeMsgPack,
+} from "../internal/pubsub/consume.js";
 import { publishJSON } from "../internal/pubsub/publish.js";
 import {
 	ExchangePerilDirect,
@@ -15,12 +21,23 @@ async function main() {
 	const conn = await amqp.connect(connectionString);
 	const confChannel = await conn.createConfirmChannel();
 
-	await declareAndBind(
+	await subscribeMsgPack<GameLog>(
 		conn,
 		ExchangePerilTopic,
 		GameLogSlug,
 		`${GameLogSlug}.*`,
 		SimpleQueueType.Durable,
+		async (gameLog: GameLog) => {
+			try {
+				await writeLog(gameLog);
+			} catch (err) {
+				console.log(`Error writing log: ${(err as Error).message}`);
+				process.stdout.write("> ");
+				return AckType.NackRequeue;
+			}
+			process.stdout.write("> ");
+			return AckType.Ack;
+		},
 	);
 	console.log("Connection successful");
 	process.on("SIGINT", async () => {
