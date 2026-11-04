@@ -6,10 +6,13 @@ import {
 	printClientHelp,
 	printQuit,
 } from "../internal/gamelogic/gamelogic.js";
-import type { ArmyMove } from "../internal/gamelogic/gamedata.js";
+import type {
+	ArmyMove,
+	RecognitionOfWar,
+} from "../internal/gamelogic/gamedata.js";
 import type { PlayingState } from "../internal/gamelogic/gamestate.js";
 import { GameState } from "../internal/gamelogic/gamestate.js";
-import { handlerMove, handlerPause } from "./handlers.js";
+import { handlerMove, handlerPause, handlerWar } from "./handlers.js";
 import { commandMove } from "../internal/gamelogic/move.js";
 import { commandSpawn } from "../internal/gamelogic/spawn.js";
 import { SimpleQueueType, subscribeJSON } from "../internal/pubsub/consume.js";
@@ -19,6 +22,7 @@ import {
 	ExchangePerilDirect,
 	ExchangePerilTopic,
 	PauseKey,
+	WarRecognitionsPrefix,
 } from "../internal/routing/routing.js";
 
 async function main() {
@@ -54,7 +58,16 @@ async function main() {
 		`${ArmyMovesPrefix}.${clientName}`,
 		`${ArmyMovesPrefix}.*`,
 		SimpleQueueType.Transient,
-		handlerMove(gameState),
+		handlerMove(gameState, confChannel),
+	);
+
+	await subscribeJSON<RecognitionOfWar>(
+		conn,
+		ExchangePerilTopic,
+		WarRecognitionsPrefix,
+		`${WarRecognitionsPrefix}.*`,
+		SimpleQueueType.Durable,
+		handlerWar(gameState),
 	);
 
 	while (true) {
